@@ -32,8 +32,8 @@ jobs:
         shell: powershell
         run: |
           $ErrorActionPreference = 'Stop'
-          scoop bucket add local "$env:GITHUB_WORKSPACE"
           $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+          if (-not (Test-Path $run)) { New-Item $run -Force | Out-Null }
           foreach ($m in Get-ChildItem bucket\*.json) {
             $app = $m.BaseName
             $version = (Get-Content $m -Raw | ConvertFrom-Json).version
@@ -42,7 +42,7 @@ jobs:
               # An autostart entry left on a versioned folder must move to 'current'.
               Set-ItemProperty $run -Name Ombra -Value "`"$appdir\0.0.1\ombra.exe`""
             }
-            scoop install "local/$app"
+            scoop install $m.FullName
             if ($LASTEXITCODE) { throw "scoop install $app failed" }
             if (-not (Test-Path "$appdir\$version")) { throw "$app $version not installed" }
             if ($app -eq 'ombra') {

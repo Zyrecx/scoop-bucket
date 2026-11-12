@@ -1,0 +1,59 @@
+name: Install
+
+on:
+  push:
+    branches:
+      - 'master'
+    paths:
+      - 'bucket/**'
+      - '.github/workflows/install.yml'
+  pull_request:
+    paths:
+      - 'bucket/**'
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  install:
+    name: Install, update path, uninstall
+    runs-on: windows-latest
+    steps:
+      - name: Checkout Bucket
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+      - name: Install Scoop
+        shell: powershell
+        run: |
+          Invoke-RestMethod -Uri https://get.scoop.sh -OutFile install-scoop.ps1
+          .\install-scoop.ps1 -RunAsAdmin
+          "$env:USERPROFILE\scoop\shims" | Out-File -Append -Encoding utf8 $env:GITHUB_PATH
+      - name: Install every manifest
+        shell: powershell
+        run: |
+          $ErrorActionPreference = 'Stop'
+          scoop bucket add local "$env:GITHUB_WORKSPACE"
+          $run = 'HKCU:\Software\Microsoft\Windows\CurrentVersion\Run'
+          foreach ($m in Get-ChildItem bucket\*.json) {
+            $app = $m.BaseName
+            $version = (Get-Content $m -Raw | ConvertFrom-Json).version
+            $appdir = "$env:USERPROFILE\scoop\apps\$app"
+            if ($app -eq 'ombra') {
+              # An autostart entry left on a versioned folder must move to 'current'.
+              Set-ItemProperty $run -Name Ombra -Value "`"$appdir\0.0.1\ombra.exe`""
+            }
+            scoop install "local/$app"
+            if ($LASTEXITCODE) { throw "scoop install $app failed" }
+            if (-not (Test-Path "$appdir\$version")) { throw "$app $version not installed" }
+            if ($app -eq 'ombra') {
+              foreach ($f in 'ombra.exe', 'ombra-ui.exe') {
+                if (-not (Test-Path "$appdir\current\$f")) { throw "missing $f" }
+              }
+              $value = (Get-ItemProperty $run -Name Ombra).Ombra
+              if ($value -ne "`"$appdir\current\ombra.exe`"") { throw "Run value not moved to current: $value" }
+              "Run value: $value"
+            }
+            scoop uninstall $app
+            if ($LASTEXITCODE) { throw "scoop uninstall $app failed" }
+            if (Test-Path $appdir) { throw "$app left $appdir behind" }
+          }
